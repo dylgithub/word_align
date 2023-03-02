@@ -1,0 +1,8 @@
+.idea
+awesome_align.egg-info
+build
+dist
+__pycache__
+cache
+rbt3
+examples
