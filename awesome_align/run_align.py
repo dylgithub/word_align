@@ -63,13 +63,19 @@ class LineByLineTextDataset(Dataset):
                 src, tgt = line.split(' ||| ')
                 if src.rstrip() == '' or tgt.rstrip() == '':
                     return None
-
+                # sent_src记录文本1分词的结果
+                # sent_src['红霉素', '肠溶', '胶囊', '肺炎', '吃', '几次']
                 sent_src, sent_tgt = src.strip().split(), tgt.strip().split()
+                # tokenize处理，用的Bert的tokenize相当于分字
+                # [['红', '霉', '素'], ['肠', '溶'], ['胶', '囊'], ['肺', '炎'], ['吃'], ['几', '次']]
                 token_src, token_tgt = [self.tokenizer.tokenize(word) for word in sent_src], [
                     self.tokenizer.tokenize(word) for word in sent_tgt]
+                # wid_src
+                # [[5273, 7450, 5162], [5499, 3988], [5540, 1718], [5511, 4142], [1391], [1126, 3613]]
                 wid_src, wid_tgt = [self.tokenizer.convert_tokens_to_ids(x) for x in token_src], [
                     self.tokenizer.convert_tokens_to_ids(x) for x in token_tgt]
-
+                # ids_src文本1的字id列表，添加cls和sep标签的token id
+                # tensor([[ 101, 5273, 7450, 5162, 5499, 3988, 5540, 1718, 5511, 4142, 3680, 3189, 1391, 1126, 3613,  102]])
                 ids_src, ids_tgt = \
                     self.tokenizer.prepare_for_model(list(itertools.chain(*wid_src)), return_tensors='pt',
                                                      max_length=self.tokenizer.max_len)['input_ids'], \
@@ -78,19 +84,21 @@ class LineByLineTextDataset(Dataset):
                 if len(ids_src[0]) == 2 or len(ids_tgt[0]) == 2:
                     return None
                 bpe2word_map_src = []
+                # bpe2word_map_src记录文本1每个token属于第几个词
+                # bpe2word_map_src[0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 5, 5]
                 for i, word_list in enumerate(token_src):
                     bpe2word_map_src += [i for x in word_list]
+                # # bpe2word_map_tgt记录文本2每个token属于第几个词
                 bpe2word_map_tgt = []
                 for i, word_list in enumerate(token_tgt):
                     bpe2word_map_tgt += [i for x in word_list]
-                # print(ids_src[0], len(ids_src[0]))
-                # print(ids_tgt[0], len(ids_tgt[0]))
-                # print(bpe2word_map_src)
-                # print(sent_src)
+                # ids_src记录所有文本1的token id [[],[].......]
                 self.ids_src.append(ids_src[0])
                 self.ids_tgt.append(ids_tgt[0])
+                # ids_src记录所有文本1的token对应到文本中的哪个词 [[],[].......]
                 self.bpe2word_map_src.append(bpe2word_map_src)
                 self.bpe2word_map_tgt.append(bpe2word_map_tgt)
+                # 文本1的句子集合
                 self.sent_src.append(sent_src)
                 self.sent_tgt.append(sent_tgt)
 
@@ -130,7 +138,7 @@ def word_align(args, model: PreTrainedModel, tokenizer: PreTrainedTokenizer):
         ids_tgt = pad_sequence(ids_tgt, batch_first=True, padding_value=tokenizer.pad_token_id)
         return ids_src, ids_tgt, bpe2word_map_src, bpe2word_map_tgt, sents_src, sents_tgt
     print("args.data_file.....", args.data_file)
-    train_dataset = LineByLineTextDataset("../data/word_align_use_final.txt")
+    train_dataset = LineByLineTextDataset(args.data_file)
     train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, collate_fn=collate)
 
     model.to(args.device)
@@ -180,7 +188,7 @@ def main():
 
     # Required parameters
     parser.add_argument(
-        "--data_file", default="../data/word_align_use.txt", type=str, help="The input data file (a text file)."
+        "--data_file", default="../data/word_align_use_final.txt", type=str, help="The input data file (a text file)."
     )
     parser.add_argument(
         "--output_file",

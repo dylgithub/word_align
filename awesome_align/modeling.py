@@ -562,12 +562,13 @@ class BertGuideHead(nn.Module):
             output_prob=False,
     ):
         # mask
-        # 标记PAD_ID，CLS_ID，SEP_ID的填充位置
+        # 标记PAD_ID，CLS_ID，SEP_ID的填充位置，只有这些位置处的值为1，其它位置的值为0，这一步操作是为了下面的attention值的计算
         attention_mask_src = ((inputs_src == PAD_ID) + (inputs_src == CLS_ID) + (inputs_src == SEP_ID)).float()
         attention_mask_tgt = ((inputs_tgt == PAD_ID) + (inputs_tgt == CLS_ID) + (inputs_tgt == SEP_ID)).float()
+        # 获取句子的真实长度，因为在attention_mask_src中已经把文本token的对应位置值置为0了
         len_src = torch.sum(1 - attention_mask_src, -1)
         len_tgt = torch.sum(1 - attention_mask_tgt, -1)
-        # 进行维度的扩充，扩充到4维，同时填充的位置变为-10000.0
+        # 进行维度的扩充，扩充到4维，同时把CLS、SEP、PAD这些Token对应的位置变为-10000.0
         attention_mask_src = return_extended_attention_mask(1 - attention_mask_src, hidden_states_src.dtype)
         attention_mask_tgt = return_extended_attention_mask(1 - attention_mask_tgt, hidden_states_src.dtype)
 
@@ -582,7 +583,7 @@ class BertGuideHead(nn.Module):
         # att
         attention_scores = torch.matmul(query_src, key_tgt.transpose(-1, -2))
         # attention_mask_tgt，attention_mask_src在被cls sep pad填充的token位置放置一个大的负数
-        # 目的是计算softmax时消除填充位置的影响
+        # 目的是计算softmax时消除CLS、SEP、PAD这些位置的影响，一个大负数对应的位置softmax后的值会很小
         attention_scores_src = attention_scores + attention_mask_tgt
         attention_scores_tgt = attention_scores + attention_mask_src.transpose(-1, -2)
 
@@ -599,9 +600,11 @@ class BertGuideHead(nn.Module):
             # A heuristic of generating the alignment probability
             attention_probs_src = nn.Softmax(dim=-1)(attention_scores_src / torch.sqrt(len_tgt.view(-1, 1, 1, 1)))
             attention_probs_tgt = nn.Softmax(dim=-2)(attention_scores_tgt / torch.sqrt(len_src.view(-1, 1, 1, 1)))
-            # 两个单向的打分调和平均获得最后的得分,
+            # 两个单向的打分调和平均获得最后的得分,使用调和平均是确保相互之间的关注度都较高
             align_prob = (2 * attention_probs_src * attention_probs_tgt) / (
                         attention_probs_src + attention_probs_tgt + 1e-9)
+            # align_matrix对齐的得分矩阵
+            # align_prob对齐的概率值
             return align_matrix, align_prob
 
         so_loss = 0
@@ -694,7 +697,7 @@ class BertForMaskedLM(BertPreTrainedModel):
                          align_layer=8, extraction='softmax', softmax_threshold=0.001, test=False, output_prob=False,
                          word_aligns=None):
         batch_size = inputs_src.size(0)
-        # 获得句子的真实长度
+        # 获得该批次中句子的最大长度，-2是去除cls、sep标签
         bpelen_src, bpelen_tgt = inputs_src.size(1) - 2, inputs_tgt.size(1) - 2
         if word_aligns is None:
             inputs_src = inputs_src.to(dtype=torch.long, device=device).clone()
@@ -732,6 +735,7 @@ class BertForMaskedLM(BertPreTrainedModel):
             for idx, (attention, b2w_src, b2w_tgt) in enumerate(
                     zip(attention_probs_inter, bpe2word_map_src, bpe2word_map_tgt)):
                 aligns = set() if not output_prob else dict()
+                # 返回非0元素对应的索引
                 non_zeros = torch.nonzero(attention)
                 for i, j in non_zeros:
                     # 记录的是相似的词对
